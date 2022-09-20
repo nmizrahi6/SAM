@@ -1,0 +1,4 @@
+Input:hello
+Output:Hi|Hello|Hi bro!
+Input:How are u?
+Output:Good, how are u?|Couldn't be better

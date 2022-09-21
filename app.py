@@ -1,4 +1,3 @@
-import pandas as pd
 import vt
 import re
 import os
@@ -11,7 +10,6 @@ from kql_parser import KQLParser
 ip_pattern = re.compile(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
 url_pattern = re.compile("^https?:\\/\\/(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)$")
 
-
 load_dotenv()
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY')
 DEBUG_ENABLED = bool(os.getenv('DEBUG'))
@@ -19,6 +17,10 @@ DEBUG_ENABLED = bool(os.getenv('DEBUG'))
 app = Flask(__name__)
 kql_parser = KQLParser()
 vt_client = vt.Client(VIRUSTOTAL_API_KEY)
+
+fileName = "BotWords.txt"
+splitterSymbol = '|'
+
 
 @app.route("/", methods=['GET'])
 def analyze_query():
@@ -60,6 +62,25 @@ def analyze_address_query(address):
         return f"Failed to get responce from VirusTotal:{e}"
 
 
+@app.route('/bot', methods=['GET'])
+def sendToBot():
+    text = request.args.get("question").lower()
+    with open(fileName) as f:
+        lines = f.readlines()
+        Words = {}
+
+        for i in range(0, len(lines) - 1, 2):
+            Words[(lines[i][lines[i].rfind(":") + 1:lines[i].rfind("\\")]).lower()] = \
+                (lines[i + 1][lines[i + 1].rfind(":") + 1:lines[i + 1].rfind("\\")]).lower().split(splitterSymbol)
+
+        if Words.get(text) == None:
+            return "Unknown text"
+
+        randomIndex = random.randint(0, len(Words.get(text)) - 1)
+
+        return Words.get(text)[randomIndex]
+
+
 def search_ip_or_url(question):
     return search_pattern(question, ip_pattern) or search_pattern(question, url_pattern)
 
@@ -71,4 +92,3 @@ def search_pattern(question, pattern):
 
 if __name__ == "__main__":
     app.run(debug=DEBUG_ENABLED)
-

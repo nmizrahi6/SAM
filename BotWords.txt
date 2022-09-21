@@ -1,4 +1,8 @@
-Input:hello
-Output:Hi|Hello|Hi bro!
+Input:Hi SAM
+Output:Hi there!
+Input:I need help with my investigation
+Output:How can I assist you?
+Input:Thanks SAM! You really helped me
+Output:<3|Any time
 Input:How are u?
 Output:Good, how are u?|Couldn't be better

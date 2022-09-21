@@ -1,20 +1,23 @@
-import random
-
 import vt
 import re
 import os
-from flask import Flask, request
+from flask import Flask, request, json
 from dotenv import load_dotenv
+import glob
+
+from kql_parser import KQLParser
 
 ip_pattern = re.compile(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
-url_pattern = re.compile(
-    "^https?:\\/\\/(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)$")
+url_pattern = re.compile("^https?:\\/\\/(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)$")
+
 
 load_dotenv()
 VIRUSTOTAL_API_KEY = os.getenv('VIRUSTOTAL_API_KEY')
 DEBUG_ENABLED = bool(os.getenv('DEBUG'))
 
 app = Flask(__name__)
+kql_parser = KQLParser()
+vt_client = vt.Client(VIRUSTOTAL_API_KEY)
 
 fileName = "BotWords.txt"
 splitterSymbol = '|'
@@ -22,24 +25,42 @@ splitterSymbol = '|'
 
 @app.route("/", methods=['GET'])
 def analyze_query():
+    query = request.args.get("question")
+    address = search_ip_or_url(query)
+    result = None
+    result_type = 'kql'
+    if address is not None:
+        result = analyze_address_query(address)
+        result_type = 'address'
+    else:
+        result = kql_parser.convert_to_kql(query)
+
+    response = app.response_class(
+        response=json.dumps({
+            'result_type': result_type,
+            'result': result,
+            'formatted_result': result.replace('\n', '<br>')
+        }),
+        mimetype='application/json'
+    )
+    return response
+# https://codesandbox.io/s/exciting-fermi-26eosc?file=/src/components/MindlerBotAvatar.jsx:168-224
+
+def analyze_address_query(address):
     try:
-        client = vt.Client(VIRUSTOTAL_API_KEY)
-        address = search_ip_or_url(request.args.get("question"))
         url_id = vt.url_id(address)
-        url = client.get_object("/urls/{}", url_id)
+        url = vt_client.get_object("/urls/{}", url_id)
         stats = url.last_analysis_stats
         is_malicious = stats["malicious"] > 0
         return f"""
         [{address=}][{is_malicious=}]
-        <br>
         score: {stats["malicious"]}/{stats["harmless"] + stats["malicious"]}
-        <br>
         {stats["malicious"] or "Zero"} security vendors flagged {address} as malicious
         """
     except vt.ClientConnectorError as e:
         return f'Failed to connect to VirusTotal:{e}'
     except Exception as e:
-        return "Are you trying to get me crazy???  :("
+        return f"Failed to get responce from VirusTotal:{e}"
 
 
 @app.route('/bot', methods=['GET'])

@@ -10,9 +10,7 @@ from pathlib import Path
 from pprint import pprint
 
 FUZZY_MATCH_THRESHOLD = 70
-
 TIME_FIELD_PLACEHOLDER = '<timeField>'
-PIPE_PLACEHOLDER = '<context>'
 
 
 class QueryOrder(IntEnum):
@@ -161,10 +159,10 @@ def get_wildcard_search(match: Match):
 def get_user_details(match: Match):
     user_id_field = get_group(match, 'entity')
     column = get_group(match, 'column')
-    if current_table is not None:
+    if current_table is not None and column is not None:
         resolved_column_name = resolve_column_name(current_table, column)
         if resolved_column_name:
-            return f"| where * contains '{user_id_field}' | project {current_table.date_field_name}, {resolved_column_name}"
+            query_operators.append((QueryOrder.Project, f"| distinct {resolved_column_name}"))
     return QueryOrder.BasicFilter, f"| where * contains '{user_id_field}'"
 
 @tokenize
@@ -175,7 +173,7 @@ def get_count(match: Match):
 def get_limit(match: Match):
     if get_group(match, 'all'):
         return QueryOrder.Take, ''
-    top = get_group(match, 'top') or 1
+    top = get_group(match, 'top') or get_group(match, 'top2') or 1
     return QueryOrder.Summarize, f'| take {top}'
 
 @tokenize
@@ -203,7 +201,7 @@ wildcard_search_op = QueryTemplateRegexOperation(
 )
 
 quantifier_op = QueryTemplateRegexOperation(
-    nl_query_pattern=re.compile(r'(?P<all>all )|(?:top|the) (?P<top>\d+)?(?: ?most| ?highest)?', re.IGNORECASE),
+    nl_query_pattern=re.compile(r'(?P<all>all )|top (?P<top>\d+)?|(?:the) (?P<top2>\d+)?(?: ?most| ?highest| )', re.IGNORECASE),
     kql_query_replace=get_limit
 )
 time_op = QueryTemplateRegexOperation(
@@ -231,30 +229,20 @@ user_field_op2 = QueryTemplateRegexOperation(
     kql_query_replace=get_user_details
 )
 user_field_op3 = QueryTemplateRegexOperation(
-    nl_query_pattern=re.compile(r"(?P<value>\w+) (?:is|are|do|does) (?P<entity>\S+) (?:in|have)", re.IGNORECASE),
+    nl_query_pattern=re.compile(r"(?P<column>\w+) (?:is|are|do|does) (?P<entity>\S+) (?:in|have)", re.IGNORECASE),
     kql_query_replace=get_user_details
 )
-
 
 risky_search_op = QueryTemplateRegexOperation(
     nl_query_pattern=re.compile(r"\brisky?", re.IGNORECASE),
     kql_query_replace=get_wildcard_search
 )
 
-pipeline = [
-    ignore_op,
-    time_op,
-    user_field_op,
-    user_field_op2,
-    user_field_op3,
-    wildcard_search_op,
-    quantifier_op,
-    count_op,
-    extract_fields_op
-]
 
 def add_tablename_keywords():
     Table.TABLES['IdentityInfo'].register_keywords(['user', 'owner'])
+    Table.TABLES['SecurityIncident'].register_keywords(['incident'])
+    Table.TABLES['SecurityAlert'].register_keywords(['alert'])
 
 
 def infer_table_name(query):
@@ -270,7 +258,17 @@ def infer_table_name(query):
 class KQLParser:
     def __init__(self):
         self.init_tables()
-
+        self.pipeline = [
+                ignore_op,
+                time_op,
+                user_field_op,
+                user_field_op2,
+                user_field_op3,
+                wildcard_search_op,
+                quantifier_op,
+                count_op,
+                extract_fields_op
+            ]
 
     def get_table_name(self, query):
         global current_table
@@ -294,37 +292,23 @@ class KQLParser:
         query_operators = []
         query_operators.append((QueryOrder.TableName, current_table.name))
         text = query
-        for op in pipeline:
+        for op in self.pipeline:
             text = op.apply(text)
+            print('------')
             print(text)
-            pprint(query_operators)
-
-        return '\n'.join([op for order, op in sorted(query_operators)])
+            pprint([op for order, op in sorted(query_operators)])
+        kql_query = '\n'.join([op for order, op in sorted(query_operators)])
+        return kql_query
 
 # Who is [username] manager
 # Show me all ongoing high severity incidents
 # I want to see all anomalies from the past week for [username]
 
 if __name__ == "__main__":
-    for csv in glob.glob('table_schemas/*.csv'):
-        name = Path(csv).stem
-        schema = pd.read_csv(csv)
-        date_field_name = schema[schema.ColumnType == 'datetime'].ColumnName.iloc[0]
-        Table(name, date_field_name, schema)
-    add_tablename_keywords()
+    kql_parser = KQLParser()
     query = "Who is the manager of Harry"
     query = "Who is the Harry's manager"
     query = "Who are the most risky users"
-    likelihood, table_name = infer_table_name(query)
-    if likelihood > FUZZY_MATCH_THRESHOLD:
-        current_table = Table.get(table_name)
-    else:
-        current_table = Table.TABLES['IdentityInfo']
-    text = query
-    for op in pipeline:
-        text = op.apply(text)
-        print(text)
-        pprint(query_operators)
-    query_operators.append((QueryOrder.TableName, current_table.name))
-    print('\n'.join([op for order, op in sorted(query_operators)]))
+    query = "What department is the users with domain username@domain.com in"
+    print(kql_parser.convert_to_kql(query))
 

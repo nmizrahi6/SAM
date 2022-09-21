@@ -2,7 +2,7 @@ import pandas as pd
 import vt
 import re
 import os
-from flask import Flask, request
+from flask import Flask, request, json
 from dotenv import load_dotenv
 import glob
 
@@ -24,10 +24,24 @@ vt_client = vt.Client(VIRUSTOTAL_API_KEY)
 def analyze_query():
     query = request.args.get("question")
     address = search_ip_or_url(query)
+    result = None
+    result_type = 'kql'
     if address is not None:
-        return analyze_address_query(address)
-    return kql_parser.convert_to_kql(query)
+        result = analyze_address_query(address)
+        result_type = 'address'
+    else:
+        result = kql_parser.convert_to_kql(query)
 
+    response = app.response_class(
+        response=json.dumps({
+            'result_type': result_type,
+            'result': result,
+            'formatted_result': result.replace('\n', '<br>')
+        }),
+        mimetype='application/json'
+    )
+    return response
+# https://codesandbox.io/s/exciting-fermi-26eosc?file=/src/components/MindlerBotAvatar.jsx:168-224
 
 def analyze_address_query(address):
     try:
@@ -37,9 +51,7 @@ def analyze_address_query(address):
         is_malicious = stats["malicious"] > 0
         return f"""
         [{address=}][{is_malicious=}]
-        <br>
         score: {stats["malicious"]}/{stats["harmless"] + stats["malicious"]}
-        <br>
         {stats["malicious"] or "Zero"} security vendors flagged {address} as malicious
         """
     except vt.ClientConnectorError as e:
